@@ -18,7 +18,7 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase, BatchE
 from transformers.generation.logits_process import LogitsProcessor, TopKLogitsWarper, TopPLogitsWarper, TemperatureLogitsWarper
 from transformers.generation.configuration_utils import GenerationConfig
 
-from waterfall.permute import Permute
+from waterfall.permute import Permute, LRUCache
 from waterfall.WatermarkingFn import WatermarkingFn
 from waterfall.WatermarkingFnFourier import WatermarkingFnFourier
 
@@ -51,19 +51,19 @@ class PerturbationProcessor(LogitsProcessor):
         self.id = id
         self.N = N
         self.init_token_count = None
-        self.phi = torch.zeros(N)
-        self.phi_device = None
 
         self.n_gram = 2
         self.skip_watermark = False
         self.permute = Permute(self.N)
 
-        self._perm_cache = {}
+        self.phi = torch.zeros(N)
+        self.phi_device = None
+        self.phi_cache = LRUCache(capacity=2000) 
 
     def reset(self, n_gram : int = 2) -> None:
         self.n_gram = n_gram
         self.init_token_count = None
-        self._perm_cache.clear()
+        self.phi_cache.clear()
 
         if torch.allclose(self.phi,torch.median(self.phi)):
             self.skip_watermark = True
@@ -74,7 +74,7 @@ class PerturbationProcessor(LogitsProcessor):
     def set_phi(self, phi : np.ndarray) -> None:
         self.phi = torch.from_numpy(phi)
         self.phi_device = None
-        self._perm_cache.clear()
+        self.phi_cache.clear()
 
     def __call__(self, input_ids: torch.LongTensor,
                  scores: torch.FloatTensor) -> torch.FloatTensor:
@@ -99,15 +99,13 @@ class PerturbationProcessor(LogitsProcessor):
         perturbations = []
         for toks in prev_tokens:
             key = tuple(toks)
-            cached = self._perm_cache.get(key)
-            if cached is not None:
-                perturbations.append(cached)
-            else:
+            perm_phi = self.phi_cache.get(key)
+            if perm_phi is None: # check if perturbation signal was cached
                 perm = self.permute.get_permutation(toks, self.id, cache=True)
                 perm_t = torch.from_numpy(perm.astype(np.int64)).to(device)
-                result = self.phi_device[perm_t]
-                self._perm_cache[key] = result 
-                perturbations.append(result)
+                perm_phi = self.phi_device[perm_t]
+                self.phi_cache.put(key, perm_phi)
+            perturbations.append(perm_phi)
         scores[:, :self.N] += torch.stack(perturbations)
         return scores
 
