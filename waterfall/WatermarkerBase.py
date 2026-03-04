@@ -44,23 +44,27 @@ else:
 
 class PerturbationProcessor(LogitsProcessor):
     def __init__(self,
-                 N : int = 32000,     # Vocab size
-                 id : int = 0,        # Watermark ID
-                 ) -> None:
+        N : int = 32000,     # Vocab size
+        id : int = 0,        # Watermark ID
+    ) -> None:
 
         self.id = id
         self.N = N
         self.init_token_count = None
         self.phi = torch.zeros(N)
+        self.phi_device = None
+
         self.n_gram = 2
-
         self.skip_watermark = False
-
         self.permute = Permute(self.N)
+
+        self._perm_cache = {}
 
     def reset(self, n_gram : int = 2) -> None:
         self.n_gram = n_gram
         self.init_token_count = None
+        self._perm_cache.clear()
+
         if torch.allclose(self.phi,torch.median(self.phi)):
             self.skip_watermark = True
             logging.warning(f"Generating without watermark as watermarking function is flat")
@@ -69,6 +73,8 @@ class PerturbationProcessor(LogitsProcessor):
 
     def set_phi(self, phi : np.ndarray) -> None:
         self.phi = torch.from_numpy(phi)
+        self.phi_device = None
+        self._perm_cache.clear()
 
     def __call__(self, input_ids: torch.LongTensor,
                  scores: torch.FloatTensor) -> torch.FloatTensor:
@@ -76,8 +82,11 @@ class PerturbationProcessor(LogitsProcessor):
         if self.skip_watermark:
             return scores
 
+        device = scores.device
+
         if self.init_token_count is None:
             self.init_token_count = input_ids.shape[1]
+            self.phi_device = self.phi.to(device=device, dtype=scores.dtype)
 
         # Insufficient tokens generated for n-gram
         if self.init_token_count + self.n_gram - 1 > input_ids.shape[1]:
@@ -86,14 +95,20 @@ class PerturbationProcessor(LogitsProcessor):
         # using numpy as PyTorch tensors doesn't hash properly for rng and dict key
         prev_tokens = input_ids[:,-self.n_gram+1:].cpu().numpy()
 
-        permutations = (
-            self.permute.get_permutation(prev_tokens[i,:], self.id, cache=True)
-            for i in range(prev_tokens.shape[0])
-        )
-        perturbations = torch.stack([
-            self.phi[permutation] for permutation in permutations
-        ])
-        scores[:,:self.N] += perturbations.to(device=scores.device, dtype=scores.dtype)
+
+        perturbations = []
+        for toks in prev_tokens:
+            key = tuple(toks)
+            cached = self._perm_cache.get(key)
+            if cached is not None:
+                perturbations.append(cached)
+            else:
+                perm = self.permute.get_permutation(toks, self.id, cache=True)
+                perm_t = torch.from_numpy(perm.astype(np.int64)).to(device)
+                result = self.phi_device[perm_t]
+                self._perm_cache[key] = result 
+                perturbations.append(result)
+        scores[:, :self.N] += torch.stack(perturbations)
         return scores
 
 def indices_to_counts(N : int, dtype : np.dtype, indices : np.ndarray) -> csr_matrix:
