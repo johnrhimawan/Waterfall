@@ -3,7 +3,7 @@ Gregory Kang Ruey Lau*, Xinyuan Niu*, Hieu Dao, Jiangwei Chen, Chuan-Sheng Foo, 
 
 [EMNLP](https://aclanthology.org/2024.emnlp-main.1138/) | [ArXiv](https://arxiv.org/abs/2407.04411) | [PDF](https://arxiv.org/pdf/2407.04411)
 
-## TL;DR: Training-free framework for text watermarking that is scalable, robust to LLM attacks, and applicable to original text of multiple types 
+## TL;DR: Training-free framework for text watermarking that is scalable, robust to LLM attacks, and applicable to original text of multiple types
 
 ![Alt text](https://raw.githubusercontent.com/aoi3142/Waterfall/main/Images/Problem_formulation.jpg "")
 
@@ -126,11 +126,12 @@ watermark_strength = verify_texts(test_texts, id)     # np array of floats
 
 ## Code structure
 
-- `watermark.py`              : Sample watermarking script used by with `watermark_demo` command, includes beam search and other optimizations
-- `WatermarkerBase.py`        : Underlying generation and verification code provided by `Watermarker` class
-- `WatermarkingFn.py`         : Abstract class `WatermarkingFn` for watermarking functions, inherit it to create new perturbation functions
+- `watermark.py`              : Sample watermarking script used by the `waterfall_demo` command, includes beam search and other optimizations
+- `WatermarkerBase.py`        : Underlying generation and verification code provided by the `Watermarker` class
+- `WatermarkingFn.py`         : Abstract class `WatermarkingFn` for watermarking functions; inherit it to create new perturbation functions
 - `WatermarkingFnFourier.py`  : Fourier watermarking function `WatermarkingFnFourier` inherited from `WatermarkingFn`
 - `WatermarkingFnSquare.py`   : Square watermarking function `WatermarkingFnSquare` inherited from `WatermarkingFn`
+- `permute.py`                : `Permute` class for pseudo-random permutations and `LRUCache` for permutation caching
 
 # BibTeX
 ```
